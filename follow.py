@@ -51,9 +51,9 @@ else:
 
 	check = '"authenticated": true'
 
-	current_result = login.text
+	current_result = login.json()
 
-	if check not in current_result:
+	if 'authenticated' not in current_result or not current_result['authenticated']:
 		print(login.text)
 		print('Unable to connect with your credentials, please try again')
 		exit(1)

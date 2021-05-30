@@ -77,7 +77,7 @@ line_token = None
 
 for line in script.iter_lines():
 	line = str(line)
-	if "s=\\\'edge_follow\\\'" in line:
+	if '/api/v1/friendships/{user_id}/following/' in line:
 		line_token = line
 		break
 
@@ -85,9 +85,9 @@ if not line_token:
 	print('An error occured, please try again')
 	exit(1)
 
-followers_token = line_token[line_token.index('t="') + 3:]
+followers_token = line_token[line_token.index('l="') + 3:]
 followers_token = followers_token[0:followers_token.index('"')]
-following_token = line_token[line_token.index('n="') + 3:]
+following_token = line_token[line_token.index('c="') + 3:]
 following_token = following_token[0:following_token.index('"')]
 
 followers = get_list(followers_token, user_id, 'edge_followed_by')

@@ -2,25 +2,22 @@
 
 import requests, getpass, json, sys
 
-BASE_URL = 'https://www.instagram.com/'
-GRAPH_URL = 'https://www.instagram.com/graphql/query/'
-LOGIN_URL = BASE_URL + 'accounts/login/ajax/'
+BASE_URL = 'https://www.instagram.com'
+API_URL = 'https://i.instagram.com/api/v1/friendships'
+LOGIN_URL = BASE_URL + '/accounts/login/ajax/'
 USER_AGENT = 'Instagram 123.0.0.21.114 (iPhone; CPU iPhone OS 11_4 like Mac OS X; en_US; en-US; scale=2.00; 750x1334) AppleWebKit/605.1.15'
 
-def get_list(token, user_id, key):
-	has_next_page = True
-	variables = {"id": user_id, "first": 50}
-	follow_dict = dict()
-	while has_next_page:
-		try:
-			follow = session.get("{}?query_hash={}&variables={}".format(GRAPH_URL, token, json.dumps(variables, separators=(',', ':')))).json()['data']['user'][key]
-		except:
-			print(session.get("{}?query_hash={}&variables={}".format(GRAPH_URL, token, json.dumps(variables, separators=(',', ':')))).json())
-		has_next_page = follow['page_info']['has_next_page']
-		variables['after'] = follow['page_info']['end_cursor']
-		for user in follow['edges']:
-			follow_dict[user['node']['username']] = {'id': user['node']['id'], 'name': user['node']['full_name']}
-	return follow_dict
+def get_list(user_id, key):
+	payload = {'max_id': True}
+	result_dict = dict()
+	while payload['max_id']:
+		if payload['max_id'] == True:
+			payload['max_id'] = ''
+		r = session.get(f"{API_URL}/{user_id}/{key}", params=payload)
+		payload['max_id'] = r.json()['next_max_id'] if 'next_max_id' in r.json() else ''
+		for user in r.json()['users']:
+			result_dict[user['username']] = {'id': user['pk'], 'name': user['full_name']}
+	return result_dict
 
 session = requests.Session()
 
@@ -28,9 +25,6 @@ if len(sys.argv) == 3:
 	session.cookies.set('ds_user_id', sys.argv[1])
 	session.cookies.set('sessionid', sys.argv[2])
 	user_id = sys.argv[1]
-
-	# get token for followers
-	profile = session.get("{}".format(BASE_URL), stream=True)
 else:
 	USERNAME = input('Username: ')
 	PASSWD = getpass.getpass()
@@ -47,51 +41,48 @@ else:
 
 	cookies = login.cookies
 
-	print("Now you can use this script with '{} {} {}'".format(sys.argv[0], cookies['ds_user_id'], cookies['sessionid']))
-
-	check = '"authenticated": true'
-
 	current_result = login.json()
 
 	if 'authenticated' not in current_result or not current_result['authenticated']:
-		print(login.text)
-		print('Unable to connect with your credentials, please try again')
+		print('Unable to connect with your credentials, please try again', file=sys.stderr)
 		exit(1)
+
+	print("Now you can use this script with '{} {} {}'".format(sys.argv[0], cookies['ds_user_id'], cookies['sessionid']))
+
+	session.cookies.clear()
+	session.headers.clear()
+
+	session.cookies.set('ds_user_id', cookies['ds_user_id'])
+	session.cookies.set('sessionid', cookies['sessionid'])
 
 	user_id = cookies['ds_user_id']
 
-	# get token for followers
-	profile = session.get("{}/{}".format(BASE_URL, USERNAME), stream=True)
+# get x-ig-app-id
+r = session.get(BASE_URL)
 
-for line in profile.iter_lines():
-	line = str(line)
-	if 'Consumer.js' in line and '<link' in line:
-		line = line.split(' ')
-		for item in line:
-			if 'href' in item:
-				script_url = BASE_URL + item[7:-1]
-
-script = session.get(script_url)
-
-line_token = None
-
-for line in script.iter_lines():
-	line = str(line)
-	if '/api/v1/friendships/{user_id}/following/' in line:
-		line_token = line
-		break
-
-if not line_token:
-	print('An error occured, please try again')
+if r.status_code != 200:
+	print("Error in status_code ({}): {}".format(r.status_code, r.content), file=sys.stderr)
 	exit(1)
 
-followers_token = line_token[line_token.index('l="') + 3:]
-followers_token = followers_token[0:followers_token.index('"')]
-following_token = line_token[line_token.index('c="') + 3:]
-following_token = following_token[0:following_token.index('"')]
+for line in r.text.split('\n'):
+	if 'ConsumerLibCommon' in line and '<script' in line:
+		script = BASE_URL + line.split('src="')[1].split('"')[0]
+		break
+if not script:
+	print('Script not found', file=sys.stderr)
+	exit(1)
 
-followers = get_list(followers_token, user_id, 'edge_followed_by')
-following = get_list(following_token, user_id, 'edge_follow')
+r = session.get(script)
+if r.status_code != 200:
+	print("Error in status_code ({}): {}".format(r.status_code, r.content), file=sys.stderr)
+	exit(1)
+for line in r.text.split('\n'):
+	if 'instagramWebDesktopFBAppId=\'' in line:
+		session.headers.update({'x-ig-app-id': line.split('instagramWebDesktopFBAppId=\'')[1].split('\'')[0]})
+		break
+
+followers = get_list(user_id, 'followers')
+following = get_list(user_id, 'following')
 
 good = sorted(followers.keys() - following.keys())
 bad = sorted(following.keys() - followers.keys())
